@@ -64,7 +64,7 @@ def cifar10(num_train=None, num_test=None, x_dtype=torch.float32):
 
 
 def preprocess_cifar10(
-    cuda=True,
+    use_gpu=True,
     show_examples=True,
     bias_trick=False,
     flatten=True,
@@ -109,12 +109,24 @@ def preprocess_cifar10(
     """
     X_train, y_train, X_test, y_test = cifar10(x_dtype=dtype)
 
-    # Move data to the GPU
-    if cuda:
-        X_train = X_train.cuda()
-        y_train = y_train.cuda()
-        X_test = X_test.cuda()
-        y_test = y_test.cuda()
+    if use_gpu:
+        device = (
+            "cuda"
+            if torch.cuda.is_available()
+            else "mps"
+            if torch.backends.mps.is_available()
+            else "cpu"
+        )
+    else:
+        device = "cpu"
+
+    print(f"Using {device} device")
+
+    # Move data to the GPU device
+    X_train = X_train.to(device)
+    y_train = y_train.to(device)
+    X_test = X_test.to(device)
+    y_test = y_test.to(device)
 
     # 0. Visualize some examples from the dataset.
     if show_examples:
