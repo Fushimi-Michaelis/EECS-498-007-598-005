@@ -65,7 +65,7 @@ def cifar10(num_train=None, num_test=None, x_dtype=torch.float32):
 
 def preprocess_cifar10(
     use_gpu=True,
-    show_examples=True,
+    show_examples=False,
     bias_trick=False,
     flatten=True,
     validation_ratio=0.2,
