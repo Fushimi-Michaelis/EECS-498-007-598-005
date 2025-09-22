@@ -259,6 +259,18 @@ def train_detector(
     plt.plot(loss_history)
     plt.show()
 
+# Define an "inverse" transform for the image that un-normalizes by ImageNet
+# color. Without this, the images will NOT be visually understandable.
+inverse_norm = transforms.Compose(
+    [
+        transforms.Normalize(
+            mean=[0.0, 0.0, 0.0], std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
+        ),
+        transforms.Normalize(
+            mean=[-0.485, -0.456, -0.406], std=[1.0, 1.0, 1.0]
+        ),
+    ]
+)
 
 def inference_with_detector(
     detector,
@@ -277,28 +289,17 @@ def inference_with_detector(
     detector.eval()
     start_t = time.time()
 
-    # Define an "inverse" transform for the image that un-normalizes by ImageNet
-    # color. Without this, the images will NOT be visually understandable.
-    inverse_norm = transforms.Compose(
-        [
-            transforms.Normalize(
-                mean=[0.0, 0.0, 0.0], std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
-            ),
-            transforms.Normalize(
-                mean=[-0.485, -0.456, -0.406], std=[1.0, 1.0, 1.0]
-            ),
-        ]
-    )
+    
 
     if output_dir is not None:
         det_dir = "mAP/input/detection-results"
         gt_dir = "mAP/input/ground-truth"
         if os.path.exists(det_dir):
             shutil.rmtree(det_dir)
-        os.mkdir(det_dir)
+        os.makedirs(det_dir)
         if os.path.exists(gt_dir):
             shutil.rmtree(gt_dir)
-        os.mkdir(gt_dir)
+        os.makedirs(gt_dir)
 
     for iter_num, test_batch in enumerate(test_loader):
         image_paths, images, gt_boxes = test_batch

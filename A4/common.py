@@ -82,9 +82,16 @@ class DetectorBackboneWithFPN(nn.Module):
         # there are trainable weights inside it.
         # Add THREE lateral 1x1 conv and THREE output 3x3 conv layers.
         self.fpn_params = nn.ModuleDict()
-
-        # Replace "pass" statement with your code
-        pass
+        for level_name, feature_shape in dummy_out_shapes:
+            in_channels = feature_shape[1]
+            # Lateral 1x1 conv
+            self.fpn_params[f"lateral_{level_name}"] = nn.Conv2d(
+                in_channels, self.out_channels, kernel_size=1
+            )
+            # Output 3x3 conv
+            self.fpn_params[f"output_{level_name}"] = nn.Conv2d(
+                self.out_channels, self.out_channels, kernel_size=3, padding=1
+            )
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -111,7 +118,24 @@ class DetectorBackboneWithFPN(nn.Module):
         ######################################################################
 
         # Replace "pass" statement with your code
-        pass
+        # Get p5 feature from c5 using lateral and output convs
+        c5 = backbone_feats["c5"]
+        lateral_c5 = self.fpn_params["lateral_c5"].forward(c5)
+        fpn_feats["p5"] = self.fpn_params["output_c5"].forward(lateral_c5)
+        # Upsample to get p4 and p3 features
+        upsampled_p4 = F.interpolate(lateral_c5, scale_factor=2, mode="nearest")
+        upsampled_p3 = F.interpolate(upsampled_p4, scale_factor=2, mode="nearest")
+        # Get conv output of backbone features using lateral convs
+        for level_name in ["c3", "c4"]:
+            backbone_feat = backbone_feats[level_name]
+            lateral_conv = self.fpn_params[f"lateral_{level_name}"]
+            output_conv = self.fpn_params[f'output_{level_name}']
+            if level_name == 'c3':
+                lateral_out = lateral_conv.forward(backbone_feat) + upsampled_p3
+                fpn_feats["p3"] = output_conv.forward(lateral_out)
+            else:
+                lateral_out = lateral_conv.forward(backbone_feat) + upsampled_p4
+                fpn_feats["p4"] = output_conv.forward(lateral_out)
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -157,7 +181,22 @@ def get_fpn_location_coords(
         # TODO: Implement logic to get location co-ordinates below.          #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        _, _, H, W = feat_shape
+        
+        # Create 1D tensor representing the grid coordinates
+        y_coords = torch.arange(H, dtype=dtype, device=device) # Shape: (H, 1)
+        x_coords = torch.arange(W, dtype=dtype, device=device) # Shape: (W, 1)
+
+        # Create 2D grid
+        y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing='ij') # Shape: (H, W)
+
+        # Stack grids on a new dim and flatten
+        grid = torch.stack([x_grid, y_grid], dim=2) # Shape: (H, W, 2)
+        grid = grid.transpose(0, 1).reshape(-1, 2) # Shape: (H*W, 2) Transpose grid before reshape to go through lines before rows
+
+        # Conversion 
+        level_location = grid * level_stride + (level_stride / 2)
+        location_coords[level_name] = level_location
         ######################################################################
         #                             END OF YOUR CODE                       #
         ######################################################################
@@ -183,7 +222,7 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float = 0.5):
     if (not boxes.numel()) or (not scores.numel()):
         return torch.zeros(0, dtype=torch.long)
 
-    keep = None
+    keep = []
     #############################################################################
     # TODO: Implement non-maximum suppression which iterates the following:     #
     #       1. Select the highest-scoring box among the remaining ones,         #
@@ -196,7 +235,41 @@ def nms(boxes: torch.Tensor, scores: torch.Tensor, iou_threshold: float = 0.5):
     # github.com/pytorch/vision/blob/main/torchvision/csrc/ops/cpu/nms_kernel.cpp
     #############################################################################
     # Replace "pass" statement with your code
-    pass
+    # Find xy info and compute areas for all boxes
+    x1, y1, x2, y2 = boxes.unbind(dim=1)
+    areas = (x2 - x1) * (y2 - y1) 
+
+    # Sort scores with decreasing order
+    _, indices = scores.sort(dim=0, descending=True, stable=True)
+
+    # Eliminate boxes
+    while(indices.numel() > 0):
+        # Find currently highest score
+        index = indices[0]
+        keep.append(index.item())
+
+        if(indices.numel() == 1):
+            break
+
+        # Compute area of interactional part
+        xx1 = torch.maximum(x1[index], x1[indices[1:]])
+        yy1 = torch.maximum(y1[index], y1[indices[1:]])
+        xx2 = torch.minimum(x2[index], x2[indices[1:]])
+        yy2 = torch.minimum(y2[index], y2[indices[1:]])
+
+        inter_area = (xx2 - xx1).clamp(min=0) * (yy2 - yy1).clamp(min=0)
+
+        # Compute area of union part
+        union_area = areas[index] + areas[indices[1:]] - inter_area
+
+        # Compute IoU scores
+        iou_scores = inter_area / union_area
+
+        # Eliminate boxes with IoU greater than threshold
+        inds = torch.where(iou_scores <= iou_threshold)[0]
+        indices = indices[inds + 1] # index 0 is the highest one, inds coresponds to indices[1:]
+    
+    keep = torch.tensor(keep, dtype=torch.long, device=boxes.device)
     #############################################################################
     #                              END OF YOUR CODE                             #
     #############################################################################
